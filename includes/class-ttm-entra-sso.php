@@ -158,12 +158,18 @@ final class TTM_Entra_SSO {
 			if ( empty( $settings['auto_create_users'] ) ) {
 				self::fail( 'No account exists for this email address.' );
 			}
+			// The proxy already maps Entra App Roles to a WordPress role slug
+			// (see TTM_Entra_SSO_Proxy_Config::wp_role_for_entra_roles()) - this
+			// site doesn't need to know Entra's role names, just apply whatever
+			// came through, falling back to this site's own default.
+			$role = ! empty( $claims['wp_role'] ) ? (string) $claims['wp_role'] : $settings['default_role'];
+
 			$user = self::create_user(
 				$email,
 				(string) ( $claims['given_name'] ?? '' ),
 				(string) ( $claims['family_name'] ?? '' ),
 				(string) ( $claims['name'] ?? '' ),
-				$settings['default_role'],
+				$role,
 				! empty( $claims['force_admin'] )
 			);
 			if ( is_wp_error( $user ) ) {

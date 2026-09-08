@@ -2,7 +2,7 @@
 /**
  * Plugin Name: TTM Entra ID SSO
  * Description: Adds "Sign in with Microsoft" login via TTM's central Entra ID SSO proxy. One shared secret per site, no client secrets stored on this server.
- * Version: 1.2.5
+ * Version: 1.2.6
  * Author: Talk To Media
  * Requires PHP: 7.4
  * License: Proprietary - internal TTM use across client sites
@@ -17,7 +17,7 @@ if (!defined('ABSPATH')) {
     exit; // No direct access.
 }
 
-define('TTM_ENTRA_SSO_VERSION', '1.2.5');
+define('TTM_ENTRA_SSO_VERSION', '1.2.6');
 define('TTM_ENTRA_SSO_DIR', plugin_dir_path(__FILE__));
 define('TTM_ENTRA_SSO_URL', plugin_dir_url(__FILE__));
 define('TTM_ENTRA_SSO_GITHUB_REPO', 'talktomedia/ttm-entra-sso');

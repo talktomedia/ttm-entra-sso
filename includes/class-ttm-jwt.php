@@ -26,7 +26,7 @@ final class TTM_Entra_SSO_Jwt
             throw new RuntimeException('Malformed token.');
         }
 
-        [$header, $payload, $signature] = $parts;
+        list($header, $payload, $signature) = $parts;
 
         $expected = self::base64UrlEncode(hash_hmac('sha256', "{$header}.{$payload}", $secret, true));
 

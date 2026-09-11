@@ -79,11 +79,11 @@ final class TTM_Entra_SSO_Ip
             return false;
         }
 
-        if (!str_contains($entry, '/')) {
+        if (strpos($entry, '/') === false) {
             return $entry === $ip;
         }
 
-        [$subnet, $bits] = explode('/', $entry, 2);
+        list($subnet, $bits) = explode('/', $entry, 2);
 
         if (!ctype_digit($bits)) {
             return false;

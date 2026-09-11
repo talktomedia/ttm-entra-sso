@@ -33,6 +33,9 @@ final class TTM_Entra_SSO_Settings
      */
     private const DEFAULT_ENROLL_KEY = '292a2a0521e894918f79cd896244e4d4286f8b8ce432ec48ffcdf219266ac0ea';
 
+    private const SETTINGS_VERSION_OPTION = 'ttm_entra_sso_settings_version';
+    private const SETTINGS_VERSION = 1;
+
     public static function init(): void
     {
         add_action('admin_menu', [self::class, 'register_menu']);
@@ -41,6 +44,7 @@ final class TTM_Entra_SSO_Settings
         add_action('admin_notices', [self::class, 'render_enroll_notice']);
         add_action('admin_post_' . self::NONCE_ACTION, [self::class, 'handle_reconnect']);
         add_action('rest_api_init', [self::class, 'register_challenge_route']);
+        add_action('init', [self::class, 'maybe_repair_defaults']);
     }
 
     /**
@@ -75,11 +79,16 @@ final class TTM_Entra_SSO_Settings
     }
 
     /**
+     * Single source of truth for every setting's real default - both get()
+     * (for display/use) and sanitize() (for its missing-input fallback)
+     * read from here, so the two can never disagree with each other the way
+     * they used to (see maybe_repair_defaults() for why that mattered).
+     *
      * @return array<string, mixed>
      */
-    public static function get(): array
+    private static function defaults(): array
     {
-        $defaults = [
+        return [
             'proxy_url' => 'https://mainwp.talktomedia.co.uk',
             'site_id' => '',
             'shared_secret' => '',
@@ -91,8 +100,63 @@ final class TTM_Entra_SSO_Settings
             'ip_header' => 'remote_addr',
             'verify_remote_status' => '1',
         ];
+    }
 
-        return wp_parse_args(get_option(self::OPTION_KEY, []), $defaults);
+    /**
+     * @return array<string, mixed>
+     */
+    public static function get(): array
+    {
+        return wp_parse_args(get_option(self::OPTION_KEY, []), self::defaults());
+    }
+
+    /**
+     * One-time repair for sites enrolled before attempt_enroll() started
+     * building on self::get() (full defaults) instead of the raw stored
+     * option. Back then, a site's very first update_option() call for this
+     * setting - fired from attempt_enroll() with only site_id/shared_secret
+     * set - implicitly ran through sanitize() anyway (WordPress applies a
+     * registered setting's sanitize callback to every update_option() call
+     * for that option, not just Settings API form submissions), and
+     * sanitize()'s missing-input fallbacks didn't match the real defaults:
+     * proxy_url and allowed_ips ended up blank (hiding the sign-in button
+     * entirely), default_role ended up 'subscriber', auto_create_users and
+     * verify_remote_status ended up '0'. This resets exactly those
+     * still-on-their-old-wrong-fallback fields back to the real default,
+     * without touching anything an admin may have deliberately changed via
+     * the settings screen to something else since (including deliberately
+     * back to one of these same values, which is indistinguishable from the
+     * original bug and will also get reset - low risk given how few sites
+     * predate this fix).
+     */
+    public static function maybe_repair_defaults(): void
+    {
+        if ((int) get_option(self::SETTINGS_VERSION_OPTION, 0) >= self::SETTINGS_VERSION) {
+            return;
+        }
+
+        $stored = get_option(self::OPTION_KEY, []);
+        if (is_array($stored) && !empty($stored)) {
+            $wrongFallbacks = [
+                'proxy_url' => '',
+                'allowed_email_domain' => '',
+                'auto_create_users' => '0',
+                'default_role' => 'subscriber',
+                'allowed_ips' => '',
+                'verify_remote_status' => '0',
+            ];
+            $defaults = self::defaults();
+
+            foreach ($wrongFallbacks as $key => $wrongValue) {
+                if (($stored[$key] ?? null) === $wrongValue) {
+                    $stored[$key] = $defaults[$key];
+                }
+            }
+
+            update_option(self::OPTION_KEY, $stored, false);
+        }
+
+        update_option(self::SETTINGS_VERSION_OPTION, self::SETTINGS_VERSION, false);
     }
 
     public static function register_menu(): void
@@ -227,18 +291,27 @@ final class TTM_Entra_SSO_Settings
      */
     public static function sanitize(array $input): array
     {
+        // update_option() runs this against whatever it's given every time
+        // this option is saved, not just real Settings API form submissions
+        // (see maybe_repair_defaults()) - so a key that's genuinely absent
+        // from $input (as opposed to present-but-blank, which a real form
+        // submission can legitimately mean for a text field) should fall
+        // back to the actual default, not an ad hoc literal that can drift
+        // out of sync with defaults() like it did before.
+        $defaults = self::defaults();
+
         return [
-            'proxy_url' => untrailingslashit(esc_url_raw($input['proxy_url'] ?? '')),
+            'proxy_url' => untrailingslashit(esc_url_raw($input['proxy_url'] ?? $defaults['proxy_url'])),
             'site_id' => sanitize_text_field($input['site_id'] ?? ''),
             'shared_secret' => trim((string) ($input['shared_secret'] ?? '')),
-            'allowed_email_domain' => sanitize_text_field($input['allowed_email_domain'] ?? ''),
+            'allowed_email_domain' => sanitize_text_field($input['allowed_email_domain'] ?? $defaults['allowed_email_domain']),
             'auto_create_users' => !empty($input['auto_create_users']) ? '1' : '0',
-            'default_role' => sanitize_text_field($input['default_role'] ?? 'subscriber'),
-            'redirect_after_login' => esc_url_raw($input['redirect_after_login'] ?? admin_url()),
-            'allowed_ips' => sanitize_textarea_field($input['allowed_ips'] ?? ''),
+            'default_role' => sanitize_text_field($input['default_role'] ?? $defaults['default_role']),
+            'redirect_after_login' => esc_url_raw($input['redirect_after_login'] ?? $defaults['redirect_after_login']),
+            'allowed_ips' => sanitize_textarea_field($input['allowed_ips'] ?? $defaults['allowed_ips']),
             'ip_header' => in_array($input['ip_header'] ?? '', ['remote_addr', 'cf_connecting_ip', 'x_forwarded_for'], true)
                 ? $input['ip_header']
-                : 'remote_addr',
+                : $defaults['ip_header'],
             'verify_remote_status' => !empty($input['verify_remote_status']) ? '1' : '0',
         ];
     }

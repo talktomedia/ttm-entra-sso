@@ -89,7 +89,7 @@ final class TTM_Entra_SSO_Settings
             'redirect_after_login' => admin_url(),
             'allowed_ips' => '138.124.134.52',
             'ip_header' => 'remote_addr',
-            'verify_remote_status' => '0',
+            'verify_remote_status' => '1',
         ];
 
         return wp_parse_args(get_option(self::OPTION_KEY, []), $defaults);
@@ -164,7 +164,7 @@ final class TTM_Entra_SSO_Settings
             return;
         }
 
-        $current = get_option(self::OPTION_KEY, []);
+        $current = self::get();
         $current['site_id'] = sanitize_text_field((string) $body['site_id']);
         $current['shared_secret'] = trim((string) $body['shared_secret']);
         update_option(self::OPTION_KEY, $current, false);

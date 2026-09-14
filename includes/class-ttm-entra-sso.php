@@ -175,6 +175,16 @@ final class TTM_Entra_SSO {
 			if ( is_wp_error( $user ) ) {
 				self::fail( 'Could not create an account: ' . $user->get_error_message() );
 			}
+		} else {
+			// Re-apply Entra's current role/force_admin on every login, not
+			// just at account creation - otherwise a role changed in Entra
+			// (or an account that existed before this site ever adopted SSO)
+			// never takes effect here. Only acts when the claims actually say
+			// something: no wp_role and no force_admin means Entra has no
+			// opinion for this login, so an existing user's role is left as
+			// whatever it already is rather than being forced to this site's
+			// default_role.
+			self::sync_existing_user_role( $user, $claims );
 		}
 
 		wp_set_current_user( $user->ID );
@@ -187,6 +197,47 @@ final class TTM_Entra_SSO {
 
 		wp_safe_redirect( $redirect );
 		exit;
+	}
+
+	/**
+	 * Forces an already-existing user's WP role to match what Entra says it
+	 * should be right now, so a role change made in Entra (App Roles or the
+	 * force_admin_emails list) takes effect on that user's next SSO login
+	 * instead of only ever applying at account-creation time. Also covers
+	 * accounts that were created manually (or pre-date this site adopting
+	 * SSO) getting the intended role applied the first time they sign in
+	 * with Microsoft.
+	 *
+	 * Deliberately a no-op if neither claim is present: that means Entra has
+	 * no role opinion for this login (no App Role assigned, not on the
+	 * force_admin list), so an existing user's current role is left alone
+	 * rather than being reset to this site's default_role - only newly
+	 * *created* accounts fall back to default_role.
+	 *
+	 * @param array<string, mixed> $claims
+	 */
+	private static function sync_existing_user_role( WP_User $user, array $claims ): void {
+		if ( ! empty( $claims['force_admin'] ) ) {
+			$target_role = 'administrator';
+		} elseif ( ! empty( $claims['wp_role'] ) ) {
+			$target_role = (string) $claims['wp_role'];
+		} else {
+			return;
+		}
+
+		if ( in_array( $target_role, $user->roles, true ) && count( $user->roles ) === 1 ) {
+			return; // Already exactly this role - avoid a needless set_role() on every login.
+		}
+
+		if ( get_role( $target_role ) === NULL ) {
+			// A mistyped/stale slug in the proxy's app_role_map shouldn't be
+			// able to lock an existing user out of every capability.
+			error_log( "[ttm-entra-sso] Ignoring unknown role '{$target_role}' for {$user->user_email} - check the proxy's App Role mapping." );
+
+			return;
+		}
+
+		$user->set_role( $target_role );
 	}
 
 	/**

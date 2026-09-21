@@ -214,6 +214,12 @@ final class TTM_Entra_SSO {
 	 * rather than being reset to this site's default_role - only newly
 	 * *created* accounts fall back to default_role.
 	 *
+	 * On a multisite network, a plain 'administrator' role only covers this
+	 * subsite - it doesn't grant the network-wide capabilities admin tools
+	 * like Plugins/Themes expect. So an Entra-driven administrator also gets
+	 * network super admin here, checked separately from the role sync below
+	 * since it's a network-level flag rather than a per-site role.
+	 *
 	 * @param array<string, mixed> $claims
 	 */
 	private static function sync_existing_user_role( WP_User $user, array $claims ): void {
@@ -223,6 +229,10 @@ final class TTM_Entra_SSO {
 			$target_role = (string) $claims['wp_role'];
 		} else {
 			return;
+		}
+
+		if ( $target_role === 'administrator' && is_multisite() && ! is_super_admin( $user->ID ) ) {
+			grant_super_admin( $user->ID );
 		}
 
 		if ( in_array( $target_role, $user->roles, true ) && count( $user->roles ) === 1 ) {
@@ -246,6 +256,7 @@ final class TTM_Entra_SSO {
 	private static function create_user( string $email, string $given_name, string $family_name, string $full_name, string $role, bool $force_admin ) {
 		$username     = self::unique_username( $given_name, $family_name, $email );
 		$display_name = self::display_name( $given_name, $family_name, $full_name, $username );
+		$final_role   = $force_admin ? 'administrator' : $role;
 
 		$user_id = wp_insert_user( [
 			'user_login'   => $username,
@@ -254,11 +265,18 @@ final class TTM_Entra_SSO {
 			'first_name'   => $given_name,
 			'last_name'    => $family_name,
 			'display_name' => $display_name,
-			'role'         => $force_admin ? 'administrator' : $role,
+			'role'         => $final_role,
 		] );
 
 		if ( is_wp_error( $user_id ) ) {
 			return $user_id;
+		}
+
+		// See sync_existing_user_role() - on a multisite network an
+		// Entra-driven administrator also needs network super admin, since
+		// the 'administrator' role alone only covers this subsite.
+		if ( $final_role === 'administrator' && is_multisite() ) {
+			grant_super_admin( $user_id );
 		}
 
 		return get_user_by( 'id', $user_id );
